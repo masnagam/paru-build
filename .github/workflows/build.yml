@@ -1,0 +1,44 @@
+# @assisted by ai:google-gemini-3-flash
+
+name: build
+
+on:
+  schedule:
+    - cron: '19 19 * * *' # UTC
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux@sha256:b4df475619469581537637ceaace6075f4912ea1cd6db6b99d463e3a72969d04 # latest
+    permissions:
+      contents: write
+    steps:
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm base-devel git github-cli rustup sudo
+      - name: Prepare build user
+        run: |
+          useradd -m build
+          echo "build ALL=(ALL) NOPASSWD: ALL" >>/etc/sudoers
+          sudo -u build rustup default stable
+      - name: Build
+        run: |
+          sudo -u build git clone https://aur.archlinux.org/paru.git /tmp/paru
+          cd /tmp/paru
+          sudo -u build makepkg -sc --noconfirm
+      - name: Upload
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd /tmp/paru
+          PKGVER=$(grep '^pkgver=' PKGBUILD | cut -d= -f2)
+          PKGREL=$(grep '^pkgrel=' PKGBUILD | cut -d= -f2)
+          TAG_NAME="v${PKGVER}-${PKGREL}"
+          echo "Target Tag: $TAG_NAME"
+          gh release create "$TAG_NAME" --title "paru $TAG_NAME" --latest || true
+          gh release upload "$TAG_NAME" ./*.pkg.tar.zst --clobber
+          gh release edit "$TAG_NAME" --latest
